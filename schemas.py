@@ -11,15 +11,21 @@ class Role(str, Enum):
     OUTSIDE = "outside"
 
 class ApprovalStatus(str, Enum):
+    PENDING_TEACHER = "待指导教师审批"
     PENDING_ADMIN = "待管理员初审"
     PENDING_LEADER = "待负责人审批"
+    PENDING_PAY = "待财务缴费"
     APPROVED = "负责人已通过"
+    CANCELLED = "已撤销"
+    REJECTED_BY_TEACHER = "教师已驳回"
     REJECTED_BY_ADMIN = "管理员已驳回"
     REJECTED_BY_LEADER = "负责人已驳回"
 
 class ApprovalStep(str, Enum):
+    TEACHER = "teacher"
     ADMIN = "admin"
     LEADER = "leader"
+    FINANCE = "finance"
     END = "end"
 
 class DeviceStatus(str, Enum):
