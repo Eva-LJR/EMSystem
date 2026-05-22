@@ -1,70 +1,40 @@
+# main.py
 from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from routers import auth, devices, approvals, users, stats
+from init_db import init_db
 
-app = FastAPI()
+# 1. 核心：必须先实例化 app 对象！(你之前可能漏掉了这一行)
+app = FastAPI(
+    title="江南大学实验室设备管理系统",
+    description="后端 API 接口服务",
+    version="1.0.0"
+)
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-    role: str   # 新增 role 字段，取值：manager, leader, student, teacher, outside
+# 2. 配置跨域（允许 Vue 前端进行跨域请求）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 实际开发 Vue 建议指定具体端口如 ["http://localhost:9528"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.post("/vue-admin-template/user/login")
-async def login(login_req: LoginRequest):
-    # 临时：根据 role 返回不同的 token 和用户角色
-    # 实际应查询数据库验证用户名密码，并根据用户角色返回
-    role_mapping = {
-        "manager": ["manager"],
-        "leader": ["leader"],
-        "student": ["student"],
-        "teacher": ["teacher"],
-        "outside": ["outside"]
-    }
-    roles = role_mapping.get(login_req.role, ["visitor"])
-    # 生成一个简单的 token，可以包含 role 信息便于后续解析（实际生产应使用 JWT）
-    token = f"fake-token-{login_req.role}"
-    return {
-        "code": 20000,
-        "data": {
-            "token": token,
-            "roles": roles,
-            "name": f"{login_req.role}_user",
-            "avatar": "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
-        }
-    }
+# 3. 注册生命周期事件：系统启动时自动创建数据库表并初始化测试数据
+@app.on_event("startup")
+def on_startup():
+    print("正在初始化数据库及基础数据...")
+    init_db()
+    print("数据库初始化完成！")
 
-@app.get("/vue-admin-template/user/info")
-async def get_info(token: str):
-    # 临时：根据 token 中的 role 返回用户信息
-    # 简单解析 token 中的 role（实际应解码 JWT 或查数据库）
-    if "manager" in token:
-        roles = ["manager"]
-        name = "设备管理员"
-    elif "leader" in token:
-        roles = ["leader"]
-        name = "实验室负责人"
-    elif "student" in token:
-        roles = ["student"]
-        name = "学生"
-    elif "teacher" in token:
-        roles = ["teacher"]
-        name = "教师"
-    elif "outside" in token:
-        roles = ["outside"]
-        name = "校外人员"
-    else:
-        roles = ["visitor"]
-        name = "访客"
-    return {
-        "code": 20000,
-        "data": {
-            "roles": roles,
-            "name": name,
-            "avatar": "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif",
-            "introduction": "测试用户"
-        }
-    }
+# 4. 注册各个模块的路由（必须写在 app = FastAPI() 的下方）
+app.include_router(auth.router)
+app.include_router(devices.router)
+app.include_router(approvals.router)
+app.include_router(users.router)
+app.include_router(stats.router)
 
-# 登出接口保持不变
-@app.post("/vue-admin-template/user/logout")
-async def logout():
-    return {"code": 20000, "data": "success"}
+# 根路由测试
+@app.get("/")
+def read_root():
+    return {"message": "欢迎访问江南大学实验室设备管理系统 API 接口服务！"}
