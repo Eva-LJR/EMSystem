@@ -43,12 +43,28 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+# class UserUpdate(BaseModel):
+#     name: Optional[str] = None
+#     role: Optional[Role] = None
+#     avatar: Optional[str] = None
+#     college: Optional[str] = None
+#     phone: Optional[str] = None
 class UserUpdate(BaseModel):
     name: Optional[str] = None
-    role: Optional[Role] = None
-    avatar: Optional[str] = None
+    gender: Optional[str] = None
     college: Optional[str] = None
+    major: Optional[str] = None
     phone: Optional[str] = None
+    avatar: Optional[str] = None
+
+    # 教师字段
+    title: Optional[str] = None
+
+    # 学生字段，前端用 teacherName
+    teacherName: Optional[str] = None
+
+    # 校外人员字段
+    company: Optional[str] = None
 
 class UserInDB(UserBase):
     id: int
@@ -99,17 +115,24 @@ class Device(DeviceBase):
     model_config = {"from_attributes": True}
 
 # --- 审批相关 ---
+# class ApprovalBase(BaseModel):
+#     device_id: int
+#     role: Role
+#     device_name: str
+#     start_time: datetime
+#     end_time: datetime
+#     reason: str
+    # applicant_name: str
+    # applicant_id: str
+    # company: Optional[str] = None
+    # college: Optional[str] = None
+    # teacher_name: Optional[str] = None
 class ApprovalBase(BaseModel):
-    role: Role
+    device_id: int
     device_name: str
     start_time: datetime
     end_time: datetime
     reason: str
-    applicant_name: str
-    applicant_id: str
-    company: Optional[str] = None
-    college: Optional[str] = None
-    teacher_name: Optional[str] = None
 
 class ApprovalCreate(ApprovalBase):
     pass

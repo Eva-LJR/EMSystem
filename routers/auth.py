@@ -11,7 +11,8 @@ from utils import create_access_token, verify_password, SECRET_KEY, ALGORITHM
 
 router = APIRouter(prefix="/api")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/vue-admin-template/user/login")
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/vue-admin-template/user/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/vue-admin-template/user/login")
 
 
 def get_user(db: Session, username: str):
@@ -82,14 +83,38 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         )
 
 
+# @router.get("/vue-admin-template/user/info", response_model=dict)
+# async def read_user_info(current_user: User = Depends(get_current_user)):
+#     return {
+#         "code": 20000,
+#         "data": {
+#             "roles": [current_user.role.value],
+#             "name": current_user.name,
+#             "avatar": current_user.avatar or "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
+#         }
+#     }
 @router.get("/vue-admin-template/user/info", response_model=dict)
 async def read_user_info(current_user: User = Depends(get_current_user)):
     return {
         "code": 20000,
         "data": {
+            "id": current_user.id,
+            "username": current_user.username,
             "roles": [current_user.role.value],
+            "role": current_user.role.value,
             "name": current_user.name,
-            "avatar": current_user.avatar or "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
+            "gender": current_user.gender,
+            "phone": current_user.phone,
+            "avatar": current_user.avatar or "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif",
+
+            # 教师/学生字段
+            "title": current_user.title,
+            "major": current_user.major,
+            "college": current_user.college,
+            "teacherName": current_user.teacher_name,
+
+            # 校外人员字段
+            "company": current_user.company
         }
     }
 

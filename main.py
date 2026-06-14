@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth, devices, approvals, users, stats
 from init_db import init_db
+from routers import client
+
 
 # 1. 核心：必须先实例化 app 对象！(你之前可能漏掉了这一行)
 app = FastAPI(
@@ -33,6 +35,7 @@ app.include_router(devices.router)
 app.include_router(approvals.router)
 app.include_router(users.router)
 app.include_router(stats.router)
+app.include_router(client.router)
 
 # 根路由测试
 @app.get("/")

@@ -53,6 +53,8 @@ class User(Base):
     name = Column(String, nullable=False)
     role = Column(Enum(Role), nullable=False)
     gender = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    avatar = Column(String, nullable=True)
 
     # 教师台账专属
     title = Column(String, nullable=True)  # 职称
@@ -63,6 +65,7 @@ class User(Base):
 
     # 学生台账专属
     teacher_name = Column(String, nullable=True)  # 指导老师姓名
+    # TODO: 后续改为 teacher_id 外键关联
 
     # 校外人员台账专属
     company = Column(String, nullable=True)  # 所在单位名称

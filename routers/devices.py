@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from database import get_db
 # 💡 这里补全了 Approval 和 ApprovalStep 的导入
-from models import Device, DeviceStatus, Approval, ApprovalStep
+from models import Device, DeviceStatus, Approval, ApprovalStep, Role,User
 from schemas import DeviceCreate, DeviceUpdate
 from routers.auth import get_current_user
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/devices", tags=["设备管理"])
 
 @router.get("/")
 def read_devices(status: Optional[DeviceStatus] = Query(None), db: Session = Depends(get_db),
-                 current_user: dict = Depends(get_current_user)):
+                 current_user: User = Depends(get_current_user)):
     query = db.query(Device)
     if status:
         query = query.filter(Device.status == status)
@@ -21,7 +21,9 @@ def read_devices(status: Optional[DeviceStatus] = Query(None), db: Session = Dep
 
 
 @router.post("/")
-def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in [Role.ADMIN, Role.LAB_LEADER]:
+        raise HTTPException(status_code=403, detail="权限不足")
     db_device = Device(**device.dict())
     db.add(db_device)
     db.commit()
@@ -31,7 +33,9 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db), current_u
 
 @router.put("/{device_id}")
 def update_device(device_id: int, device: DeviceUpdate, db: Session = Depends(get_db),
-                  current_user: dict = Depends(get_current_user)):
+                  current_user: User = Depends(get_current_user)):
+    if current_user.role not in [Role.ADMIN, Role.LAB_LEADER]:
+        raise HTTPException(status_code=403, detail="权限不足")
     db_device = db.query(Device).filter(Device.id == device_id).first()
     if not db_device:
         raise HTTPException(status_code=404, detail="设备未找到")
@@ -44,7 +48,9 @@ def update_device(device_id: int, device: DeviceUpdate, db: Session = Depends(ge
 
 # 💡 完美融入防呆设计的删除接口
 @router.delete("/{device_id}")
-def delete_device(device_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def delete_device(device_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in [Role.ADMIN, Role.LAB_LEADER]:
+        raise HTTPException(status_code=403, detail="权限不足")
     db_device = db.query(Device).filter(Device.id == device_id).first()
     if not db_device:
         raise HTTPException(status_code=404, detail="设备未找到")
