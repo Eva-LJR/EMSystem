@@ -4,7 +4,21 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="dd829c14-1984-499b-a8d2-0bbd882bbbc3" name="更改" comment="" />
+    <list default="true" id="dd829c14-1984-499b-a8d2-0bbd882bbbc3" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/seed_base_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/EMSystem.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/EMSystem.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/routers/approvals.py" beforeDir="false" afterPath="$PROJECT_DIR$/routers/approvals.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/routers/auth.py" beforeDir="false" afterPath="$PROJECT_DIR$/routers/auth.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/routers/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/routers/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/routers/devices.py" beforeDir="false" afterPath="$PROJECT_DIR$/routers/devices.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/routers/users.py" beforeDir="false" afterPath="$PROJECT_DIR$/routers/users.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/schemas.py" beforeDir="false" afterPath="$PROJECT_DIR$/schemas.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -24,7 +38,7 @@
   &quot;associatedIndex&quot;: 4
 }</component>
   <component name="ProjectId" id="3DtIw007UKrd0Sf8gEPHnWqzG2U" />
-  <component name="ProjectLevelVcsManager" settingsEditedManually="true">
+  <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="2" id="Add" />
   </component>
   <component name="ProjectViewState">
@@ -39,7 +53,8 @@
     "Python.数据库.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main"
+    "git-widget-placeholder": "feature/db-update",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
   <component name="RecentsManager">
@@ -148,7 +163,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-495700d161d3-aa17d162503b-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-243.22562.220" />
+        <option value="bundled-python-sdk-2ee2454479a3-9cdd278e9d02-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-251.25410.122" />
       </set>
     </attachedChunks>
   </component>

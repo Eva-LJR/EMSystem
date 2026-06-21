@@ -111,7 +111,7 @@ async def read_user_info(current_user: User = Depends(get_current_user)):
             "title": current_user.title,
             "major": current_user.major,
             "college": current_user.college,
-            "teacherName": current_user.teacher_name,
+            "teacherName": None,
 
             # 校外人员字段
             "company": current_user.company
