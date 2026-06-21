@@ -89,25 +89,42 @@ class LoginRequest(BaseModel):
 
 # --- 设备相关 ---
 class DeviceBase(BaseModel):
+    device_code: Optional[str] = None
+    name: Optional[str] = None
     model: str
-    buy_time: Optional[datetime] = None
+    purchase_date: Optional[datetime] = None
+    buy_time: Optional[datetime] = None  # 兼容旧前端字段
     manufacturer: Optional[str] = None
     purpose: Optional[str] = None
-    price: Optional[float] = None
-    status: DeviceStatus = DeviceStatus.IDLE
+    purchase_price: Optional[float] = None
+    hourly_price: Optional[float] = None
+    price: Optional[float] = None  # 兼容旧前端字段
+    status: Optional[str] = None
+    location: Optional[str] = None
     available_time: Optional[str] = None
+    description: Optional[str] = None
+
 
 class DeviceCreate(DeviceBase):
     pass
 
+
 class DeviceUpdate(BaseModel):
+    device_code: Optional[str] = None
+    name: Optional[str] = None
     model: Optional[str] = None
+    purchase_date: Optional[datetime] = None
     buy_time: Optional[datetime] = None
     manufacturer: Optional[str] = None
     purpose: Optional[str] = None
+    purchase_price: Optional[float] = None
+    hourly_price: Optional[float] = None
     price: Optional[float] = None
-    status: Optional[DeviceStatus] = None
+    status: Optional[str] = None
+    location: Optional[str] = None
     available_time: Optional[str] = None
+    description: Optional[str] = None
+
 
 class Device(DeviceBase):
     id: int

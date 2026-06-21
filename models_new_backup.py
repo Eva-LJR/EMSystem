@@ -565,11 +565,3 @@ class ScrapRecord(Base):
         "User",
         foreign_keys=[reviewer_id]
     )
-
-# =========================================================
-# 临时兼容旧路由命名
-# 后续应逐步将旧代码中的 Approval 改为 Booking
-# =========================================================
-
-Approval = Booking
-ApprovalStatus = BookingStatus

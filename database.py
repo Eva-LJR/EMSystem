@@ -1,18 +1,28 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# 使用SQLite数据库，文件名为ems.db
-SQLALCHEMY_DATABASE_URL = "sqlite:///./ems.db"
+DATABASE_URL = (
+    "mysql+pymysql://root:1234"
+    "@127.0.0.1:3306/em_system"
+    "?charset=utf8mb4"
+)
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    echo=False
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
 Base = declarative_base()
 
-# 依赖项，用于获取数据库会话
+
 def get_db():
     db = SessionLocal()
     try:

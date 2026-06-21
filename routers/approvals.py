@@ -1,240 +1,460 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
+import uuid
+from decimal import Decimal
 
 from database import get_db
-from models import Approval, Device, User, Role, ApprovalStatus, ApprovalStep, DeviceStatus
-from schemas import ApprovalCreate
+from models import (
+    User,
+    Role,
+    Booking,
+    BookingStatus,
+    ApprovalStep,
+    ApprovalRecord,
+    ApprovalAction,
+    Payment,
+    PaymentStatus,
+)
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/approvals", tags=["预约审批中心"])
 
 
-# ========================= 1. 提交预约申请 =========================
-@router.post("/")
-def create_booking(payload: ApprovalCreate, db: Session = Depends(get_db),
-                   current_user: User = Depends(get_current_user)):
-    now = datetime.utcnow()
+def booking_status_label(status):
+    mapping = {
+        BookingStatus.PENDING_TEACHER: "待指导教师审批",
+        BookingStatus.PENDING_ADMIN: "待管理员初审",
+        BookingStatus.PENDING_LEADER: "待负责人审批",
+        BookingStatus.PENDING_PAYMENT: "待财务缴费",
+        BookingStatus.APPROVED: "已通过",
+        BookingStatus.REJECTED: "已驳回",
+        BookingStatus.CANCELLED: "已撤销",
+        BookingStatus.COMPLETED: "已完成",
+    }
+    return mapping.get(status, status.value if status else None)
 
-    # 核心限制：必须提前 1-7 天预约
-    if not (now + timedelta(days=1) <= payload.start_time <= now + timedelta(days=7)):
-        raise HTTPException(status_code=400, detail="根据借用规定：预约必须提前1-7天提交！")
 
-    # 核心限制：每次借用时间单位推荐为 2小时(学时)
-    duration = payload.end_time - payload.start_time
-    if duration.total_seconds() < 7200:
-        raise HTTPException(status_code=400, detail="单次借用时间不得少于2小时")
+def parse_role(value: Optional[str]):
+    if not value:
+        return None
 
-    # 查验设备冲突与排除检修中状态
-    device = db.query(Device).filter(Device.id == payload.device_id).first()
-    if not device or device.status == DeviceStatus.MAINTENANCE:
-        raise HTTPException(status_code=400, detail="该设备当前正处于检修状态，无法借用")
+    value = str(value).strip()
 
-    # 核心规则：冲突检查 + 校内人员优先原则
-    conflict_bookings = db.query(Approval).filter(
-        Approval.device_id == payload.device_id,
-        Approval.status.in_([ApprovalStatus.APPROVED, ApprovalStatus.PENDING_ADMIN, ApprovalStatus.PENDING_LEADER]),
-        Approval.start_time < payload.end_time,
-        Approval.end_time > payload.start_time
-    ).all()
+    mapping = {
+        "admin": Role.ADMIN,
+        "labLeader": Role.LAB_LEADER,
+        "leader": Role.LAB_LEADER,
+        "teacher": Role.TEACHER,
+        "student": Role.STUDENT,
+        "outside": Role.OUTSIDE,
+        "ADMIN": Role.ADMIN,
+        "LAB_LEADER": Role.LAB_LEADER,
+        "TEACHER": Role.TEACHER,
+        "STUDENT": Role.STUDENT,
+        "OUTSIDE": Role.OUTSIDE,
+    }
 
-    if conflict_bookings:
-        if current_user.role in [Role.TEACHER, Role.STUDENT]:
-            # 如果当前申请人是校内人员，可以覆盖或在审批中挤掉校外人员
-            for cb in conflict_bookings:
-                if cb.role == Role.OUTSIDE:
-                    cb.status = ApprovalStatus.REJECTED_BY_ADMIN
-                    cb.reason = "因校内教学科研任务冲突，校内人员优先使用，系统自动退单"
-        else:
-            raise HTTPException(status_code=400, detail="该时段设备已被借用或已被高优先级校内人员预约申请中")
+    if value not in mapping:
+        raise HTTPException(status_code=400, detail=f"角色参数不合法：{value}")
 
-    # 计算费用：校内人员免费，校外人员付费
-    total_fee = 0.0
-    if current_user.role == Role.OUTSIDE:
-        # 每2小时为一个计费单元
-        hours = duration.total_seconds() / 3600
-        total_fee = (hours / 2) * device.price
+    return mapping[value]
 
-    # 决定审批流起始节点
-    init_status = ApprovalStatus.PENDING_ADMIN
-    init_step = ApprovalStep.ADMIN
 
-    if current_user.role == Role.STUDENT:
-        init_status = ApprovalStatus.PENDING_TEACHER
-        init_step = ApprovalStep.TEACHER
+def parse_step(value: Optional[str]):
+    if not value:
+        return None
 
-    db_approval = Approval(
-        role=current_user.role,
-        device_id=payload.device_id,
-        device_name=payload.device_name,
-        start_time=payload.start_time,
-        end_time=payload.end_time,
-        reason=payload.reason,
-        status=init_status,
-        current_step=init_step,
-        # applicant_name=payload.applicant_name,
-        # applicant_id=payload.applicant_id,
-        # company=payload.company,
-        # college=payload.college,
-        # teacher_name=payload.teacher_name,
-        applicant_name=current_user.name,
-        applicant_id=current_user.username,
-        company=current_user.company,
-        college=current_user.college,
-        teacher_name=current_user.teacher_name,
-        total_fee=total_fee,
-        is_paid=False
+    value = str(value).strip()
+
+    mapping = {
+        "teacher": ApprovalStep.TEACHER,
+        "admin": ApprovalStep.ADMIN,
+        "leader": ApprovalStep.LEADER,
+        "finance": ApprovalStep.FINANCE,
+        "end": ApprovalStep.END,
+        "TEACHER": ApprovalStep.TEACHER,
+        "ADMIN": ApprovalStep.ADMIN,
+        "LEADER": ApprovalStep.LEADER,
+        "FINANCE": ApprovalStep.FINANCE,
+        "END": ApprovalStep.END,
+    }
+
+    if value not in mapping:
+        raise HTTPException(status_code=400, detail=f"审批环节参数不合法：{value}")
+
+    return mapping[value]
+
+
+def parse_status(value: Optional[str]):
+    if not value:
+        return None
+
+    value = str(value).strip()
+
+    mapping = {
+        "pending_teacher": BookingStatus.PENDING_TEACHER,
+        "pending_admin": BookingStatus.PENDING_ADMIN,
+        "pending_leader": BookingStatus.PENDING_LEADER,
+        "pending_payment": BookingStatus.PENDING_PAYMENT,
+        "approved": BookingStatus.APPROVED,
+        "rejected": BookingStatus.REJECTED,
+        "cancelled": BookingStatus.CANCELLED,
+        "completed": BookingStatus.COMPLETED,
+
+        "待指导教师审批": BookingStatus.PENDING_TEACHER,
+        "待管理员初审": BookingStatus.PENDING_ADMIN,
+        "待负责人审批": BookingStatus.PENDING_LEADER,
+        "待财务缴费": BookingStatus.PENDING_PAYMENT,
+        "已通过": BookingStatus.APPROVED,
+        "负责人已通过": BookingStatus.APPROVED,
+        "已驳回": BookingStatus.REJECTED,
+        "已撤销": BookingStatus.CANCELLED,
+        "已完成": BookingStatus.COMPLETED,
+
+        "PENDING_TEACHER": BookingStatus.PENDING_TEACHER,
+        "PENDING_ADMIN": BookingStatus.PENDING_ADMIN,
+        "PENDING_LEADER": BookingStatus.PENDING_LEADER,
+        "PENDING_PAYMENT": BookingStatus.PENDING_PAYMENT,
+        "APPROVED": BookingStatus.APPROVED,
+        "REJECTED": BookingStatus.REJECTED,
+        "CANCELLED": BookingStatus.CANCELLED,
+        "COMPLETED": BookingStatus.COMPLETED,
+    }
+
+    if value not in mapping:
+        raise HTTPException(status_code=400, detail=f"预约状态参数不合法：{value}")
+
+    return mapping[value]
+
+
+def generate_payment_no():
+    return "PAY" + datetime.now().strftime("%Y%m%d%H%M%S") + uuid.uuid4().hex[:6].upper()
+
+
+def add_approval_record(
+    db: Session,
+    booking: Booking,
+    approver_id: Optional[int],
+    step: ApprovalStep,
+    action: ApprovalAction,
+    before_status: Optional[str],
+    after_status: Optional[str],
+    comment: str
+):
+    record = ApprovalRecord(
+        booking_id=booking.id,
+        approver_id=approver_id,
+        approval_step=step,
+        action=action,
+        before_status=before_status,
+        after_status=after_status,
+        comment=comment,
     )
-    db.add(db_approval)
-    db.commit()
-    db.refresh(db_approval)
-    return {"code": 20000, "data": db_approval}
+    db.add(record)
 
 
-# ========================= 2. 统一查询审批列表（安全隔离版） =========================
+def booking_to_frontend(b: Booking):
+    applicant = b.applicant
+    device = b.device
+
+    applicant_name = applicant.name if applicant else None
+    applicant_username = applicant.username if applicant else None
+    applicant_role = applicant.role.value if applicant and applicant.role else None
+
+    device_name = device.model if device else None
+    device_code = device.device_code if device else None
+
+    status_text = booking_status_label(b.status)
+    status_code = b.status.value if b.status else None
+    current_step = b.current_step.value if b.current_step else None
+
+    return {
+        "id": b.id,
+        "bookingNo": b.booking_no,
+        "booking_no": b.booking_no,
+
+        # 申请人信息：驼峰 + 下划线都返回
+        "role": applicant_role,
+        "applicantName": applicant_name,
+        "applicant_name": applicant_name,
+        "applicantId": applicant_username,
+        "applicant_id": applicant_username,
+        "applicantUserId": applicant.id if applicant else None,
+        "applicant_user_id": applicant.id if applicant else None,
+
+        "company": applicant.company if applicant else None,
+        "college": applicant.college if applicant else None,
+        "phone": applicant.phone if applicant else None,
+
+        # 设备信息：驼峰 + 下划线都返回
+        "deviceId": b.device_id,
+        "device_id": b.device_id,
+        "deviceName": device_name,
+        "device_name": device_name,
+        "deviceCode": device_code,
+        "device_code": device_code,
+
+        # 时间信息：驼峰 + 下划线都返回
+        "startTime": b.start_time,
+        "start_time": b.start_time,
+        "endTime": b.end_time,
+        "end_time": b.end_time,
+
+        # 用途
+        "reason": b.purpose,
+        "purpose": b.purpose,
+
+        # 状态
+        "status": status_text,
+        "statusText": status_text,
+        "status_text": status_text,
+        "statusCode": status_code,
+        "status_code": status_code,
+
+        "currentStep": current_step,
+        "current_step": current_step,
+
+        # 费用
+        "totalFee": float(b.total_fee or 0),
+        "total_fee": float(b.total_fee or 0),
+        "isPaid": b.is_paid,
+        "is_paid": b.is_paid,
+
+        "cancelReason": b.cancel_reason,
+        "cancel_reason": b.cancel_reason,
+
+        "createdAt": b.created_at,
+        "created_at": b.created_at,
+        "updatedAt": b.updated_at,
+        "updated_at": b.updated_at,
+    }
+
+
 @router.get("/")
 def get_approvals(
-        role: Optional[Role] = Query(None, description="按申请人角色筛选"),
-        status: Optional[ApprovalStatus] = Query(None, description="按单据状态筛选"),
-        current_step: Optional[ApprovalStep] = Query(None, description="按当前审批环节筛选"),
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+    role: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    current_step: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    对接所有前端页面（包括学生、老师、管理员、实验室负责人）。
-    通过加入多维度 Query 参数和数据沙箱，确保各司其职，且不越权。
-    """
-    query = db.query(Approval)
+    if current_user.role not in [Role.ADMIN, Role.LAB_LEADER]:
+        raise HTTPException(status_code=403, detail="只有设备管理员和实验室负责人可以查看审批中心")
 
-    # 【数据隔离沙箱】
-    # 1. 如果是学生或校外人员，强制只能看自己提交的单子
-    if current_user.role in [Role.STUDENT, Role.OUTSIDE]:
-        query = query.filter(Approval.applicant_id == current_user.username)
-    # 2. 如果是指导老师，默认能看到自己名下学生的申请单
-    elif current_user.role == Role.TEACHER:
+    query = db.query(Booking).join(User, Booking.applicant_id == User.id)
+
+    role_enum = parse_role(role)
+    status_enum = parse_status(status)
+    step_enum = parse_step(current_step)
+
+    if role_enum:
+        query = query.filter(User.role == role_enum)
+
+    if status_enum:
+        query = query.filter(Booking.status == status_enum)
+
+    if step_enum:
+        query = query.filter(Booking.current_step == step_enum)
+
+    # 实验室负责人默认只看负责人审批环节、待缴费或已完成的校外相关单也可通过参数查看
+    if current_user.role == Role.LAB_LEADER and not current_step:
         query = query.filter(
-            (Approval.teacher_name == current_user.name) | (Approval.applicant_id == current_user.username))
-    # 3. 管理员（admin）和负责人（labLeader）拥有全局审计视野，不做强制过滤，依赖动态参数隔离
+            Booking.current_step.in_([
+                ApprovalStep.LEADER,
+                ApprovalStep.FINANCE,
+                ApprovalStep.END
+            ])
+        )
 
-    # 【动态条件筛选】
-    if role:
-        query = query.filter(Approval.role == role)
-    if status:
-        query = query.filter(Approval.status == status)
-    if current_step:
-        query = query.filter(Approval.current_step == current_step)
+    bookings = query.order_by(Booking.created_at.desc()).all()
 
-    return {"code": 20000, "data": query.order_by(Approval.created_at.desc()).all()}
+    return {
+        "code": 20000,
+        "data": [booking_to_frontend(b) for b in bookings]
+    }
 
 
-# ========================= 3. 统一审批通过接口（核心流转状态机） =========================
-@router.put("/{approval_id}/approve")
-def approve_workflow(approval_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    booking = db.query(Approval).filter(Approval.id == approval_id).first()
+@router.put("/{booking_id}/approve")
+def approve_workflow(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+
     if not booking:
         raise HTTPException(status_code=404, detail="预约单未找到")
 
-    # 环节 A：指导教师审批学生
-    if (
-            booking.current_step == ApprovalStep.TEACHER
-            and current_user.role == Role.TEACHER
-            and booking.teacher_name == current_user.name
-    ):
-        booking.status = ApprovalStatus.PENDING_ADMIN
-        booking.current_step = ApprovalStep.ADMIN
+    applicant = booking.applicant
 
-    # 环节 B：设备管理员初审（【100%保留您的原始逻辑】）
-    elif booking.current_step == ApprovalStep.ADMIN and current_user.role == Role.ADMIN:
-        if booking.role in [Role.TEACHER, Role.STUDENT]:
-            # 教师与学生到管理员就终审通过了
-            booking.status = ApprovalStatus.APPROVED
+    if not applicant:
+        raise HTTPException(status_code=400, detail="预约申请人不存在")
+
+    old_status = booking.status.value
+
+    # 设备管理员审批
+    if booking.current_step == ApprovalStep.ADMIN and current_user.role == Role.ADMIN:
+        if applicant.role in [Role.STUDENT, Role.TEACHER]:
+            booking.status = BookingStatus.APPROVED
             booking.current_step = ApprovalStep.END
-        elif booking.role == Role.OUTSIDE:
-            # 校外人员需要流转到负责人环节
-            booking.status = ApprovalStatus.PENDING_LEADER
+
+            comment = "设备管理员审批通过，预约成功"
+
+        elif applicant.role == Role.OUTSIDE:
+            booking.status = BookingStatus.PENDING_LEADER
             booking.current_step = ApprovalStep.LEADER
 
-    # 环节 C：实验室负责人终审（完美接入 lableader 前端动作！）
+            comment = "设备管理员初审通过，提交实验室负责人审批"
+
+        else:
+            raise HTTPException(status_code=400, detail="申请人角色异常")
+
+        add_approval_record(
+            db=db,
+            booking=booking,
+            approver_id=current_user.id,
+            step=ApprovalStep.ADMIN,
+            action=ApprovalAction.APPROVE,
+            before_status=old_status,
+            after_status=booking.status.value,
+            comment=comment,
+        )
+
+    # 实验室负责人审批校外预约
     elif booking.current_step == ApprovalStep.LEADER and current_user.role == Role.LAB_LEADER:
-        # 负责人点击通过后，校外单进入“待缴费”财务环节
-        booking.status = ApprovalStatus.PENDING_PAY
+        if applicant.role != Role.OUTSIDE:
+            raise HTTPException(status_code=400, detail="负责人只审批校外预约")
+
+        booking.status = BookingStatus.PENDING_PAYMENT
         booking.current_step = ApprovalStep.FINANCE
+
+        add_approval_record(
+            db=db,
+            booking=booking,
+            approver_id=current_user.id,
+            step=ApprovalStep.LEADER,
+            action=ApprovalAction.APPROVE,
+            before_status=old_status,
+            after_status=booking.status.value,
+            comment="实验室负责人审批通过，等待校外人员缴费",
+        )
 
     else:
         raise HTTPException(status_code=403, detail="您当前无权或单据不在您负责的审批环节")
 
     db.commit()
     db.refresh(booking)
-    return {"code": 20000, "data": booking}
+
+    return {
+        "code": 20000,
+        "message": "审批通过",
+        "data": booking_to_frontend(booking)
+    }
 
 
-# ========================= 4. 统一驳回申请 =========================
-@router.put("/{approval_id}/reject")
-def reject_workflow(approval_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    booking = db.query(Approval).filter(Approval.id == approval_id).first()
+@router.put("/{booking_id}/reject")
+def reject_workflow(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+
     if not booking:
         raise HTTPException(status_code=404, detail="预约单未找到")
 
-    # 根据不同的操作人角色，赋予不同的驳回终态
-    # if current_user.role == Role.TEACHER:
-    #     booking.status = ApprovalStatus.REJECTED_BY_TEACHER
-    if current_user.role == Role.TEACHER:
-
-        if booking.teacher_name != current_user.name:
-            raise HTTPException(
-                status_code=403,
-                detail="无权审批非本人指导学生"
-            )
-
-        booking.status = ApprovalStatus.REJECTED_BY_TEACHER
-    elif current_user.role == Role.ADMIN:
-        booking.status = ApprovalStatus.REJECTED_BY_ADMIN
-    elif current_user.role == Role.LAB_LEADER:
-        booking.status = ApprovalStatus.REJECTED_BY_LEADER
-    else:
+    if current_user.role not in [Role.ADMIN, Role.LAB_LEADER]:
         raise HTTPException(status_code=403, detail="您没有权限拒绝该单据")
 
+    if current_user.role == Role.ADMIN and booking.current_step != ApprovalStep.ADMIN:
+        raise HTTPException(status_code=400, detail="该预约不在管理员审批环节")
+
+    if current_user.role == Role.LAB_LEADER and booking.current_step != ApprovalStep.LEADER:
+        raise HTTPException(status_code=400, detail="该预约不在负责人审批环节")
+
+    old_status = booking.status.value
+
+    booking.status = BookingStatus.REJECTED
     booking.current_step = ApprovalStep.END
+
+    step = ApprovalStep.ADMIN if current_user.role == Role.ADMIN else ApprovalStep.LEADER
+
+    add_approval_record(
+        db=db,
+        booking=booking,
+        approver_id=current_user.id,
+        step=step,
+        action=ApprovalAction.REJECT,
+        before_status=old_status,
+        after_status=booking.status.value,
+        comment="审批人驳回预约申请",
+    )
+
     db.commit()
-    return {"code": 20000, "message": "申请已被驳回"}
+    db.refresh(booking)
+
+    return {
+        "code": 20000,
+        "message": "申请已被驳回",
+        "data": booking_to_frontend(booking)
+    }
 
 
-# ========================= 5. 财务回调与用户撤销（保留您的优秀核心逻辑） =========================
-@router.post("/{approval_id}/finance-callback")
-def finance_callback(approval_id: int, db: Session = Depends(get_db)):
-    booking = db.query(Approval).filter(Approval.id == approval_id).first()
-    if not booking or booking.status != ApprovalStatus.PENDING_PAY:
-        raise HTTPException(status_code=400, detail="单据状态异常，无法完成财务对账")
+@router.post("/{booking_id}/finance-callback")
+def finance_callback(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="只有设备管理员可以确认缴费")
 
-    booking.is_paid = True
-    booking.status = ApprovalStatus.APPROVED
-    booking.current_step = ApprovalStep.END
-    db.commit()
-    return {"code": 20000, "message": "学校财务处电子缴费入账成功，自动激活设备预约台账！"}
-
-
-@router.post("/{approval_id}/cancel")
-def cancel_booking(approval_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    booking = db.query(Approval).filter(Approval.id == approval_id).first()
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
 
     if not booking:
-        raise HTTPException(status_code=404, detail="单据未找到")
+        raise HTTPException(status_code=404, detail="预约单未找到")
 
-    if booking.applicant_id != current_user.username:
-        raise HTTPException(status_code=403, detail="只能撤销自己的预约")
+    if booking.status != BookingStatus.PENDING_PAYMENT:
+        raise HTTPException(status_code=400, detail="单据状态异常，无法完成缴费确认")
 
-    if booking.start_time - datetime.utcnow() < timedelta(days=1):
-        raise HTTPException(status_code=400, detail="不符合撤销规定：距离实验开始时间已不足24小时，无法撤销！")
+    old_status = booking.status.value
 
-    booking.status = ApprovalStatus.CANCELLED
+    booking.is_paid = True
+    booking.status = BookingStatus.APPROVED
     booking.current_step = ApprovalStep.END
 
-    if booking.role == Role.OUTSIDE and booking.is_paid:
-        booking.refund_amount = booking.total_fee * 0.95
-        message = f"撤销成功！已通知学校财务系统自动执行原路退款，扣除5%手续费，已退还金额：{booking.refund_amount}元。"
-    else:
-        message = "校内免费单，预约已成功撤销，不产生任何衍生费用。"
+    exists_payment = db.query(Payment).filter(Payment.booking_id == booking.id).first()
+
+    if not exists_payment:
+        payment = Payment(
+            booking_id=booking.id,
+            payer_id=booking.applicant_id,
+            payment_no=generate_payment_no(),
+            amount=Decimal(str(booking.total_fee or 0)),
+            payment_method="offline",
+            payment_status=PaymentStatus.PAID,
+            paid_at=datetime.utcnow(),
+        )
+        db.add(payment)
+
+    add_approval_record(
+        db=db,
+        booking=booking,
+        approver_id=current_user.id,
+        step=ApprovalStep.FINANCE,
+        action=ApprovalAction.PAYMENT_CONFIRM,
+        before_status=old_status,
+        after_status=booking.status.value,
+        comment="设备管理员确认校外预约缴费完成",
+    )
 
     db.commit()
-    return {"code": 20000, "message": message}
+    db.refresh(booking)
+
+    return {
+        "code": 20000,
+        "message": "缴费确认成功，预约已通过",
+        "data": booking_to_frontend(booking)
+    }
