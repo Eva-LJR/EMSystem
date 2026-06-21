@@ -35,3 +35,7 @@ var/
 .DS_Store
 Thumbs.db
 *.db
+
+# backup files
+*_backup.py
+*_new_backup.py
