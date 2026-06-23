@@ -5,9 +5,9 @@ from jose import JWTError, jwt
 import traceback
 
 from database import get_db
-from models import User
-from schemas import Token, UserInDB, LoginRequest
-from utils import create_access_token, verify_password, SECRET_KEY, ALGORITHM
+from models import User, Role, AccountStatus
+from schemas import Token, UserInDB, LoginRequest, RegisterRequest
+from utils import create_access_token, verify_password, get_password_hash, SECRET_KEY, ALGORITHM
 
 router = APIRouter(prefix="/api")
 
@@ -39,6 +39,122 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 
+
+@router.post("/vue-admin-template/user/register", response_model=dict)
+async def register(register_data: RegisterRequest, db: Session = Depends(get_db)):
+    """
+    用户注册接口：
+    1. 学生凭学号注册
+    2. 教师凭工号注册
+    3. 校外人员凭手机号注册
+    """
+
+    role = register_data.role
+
+    # 1. 只允许学生、教师、校外人员注册
+    if role not in ["student", "teacher", "outside"]:
+        raise HTTPException(
+            status_code=400,
+            detail="只允许学生、教师和校外人员注册"
+        )
+
+    # 2. 根据角色确定 username
+    if role in ["student", "teacher"]:
+        if not register_data.identity_no:
+            raise HTTPException(
+                status_code=400,
+                detail="学生或教师注册时必须填写学号/工号"
+            )
+
+        username = register_data.identity_no.strip()
+        identity_no = register_data.identity_no.strip()
+        phone = register_data.phone.strip() if register_data.phone else None
+
+    else:
+        if not register_data.phone:
+            raise HTTPException(
+                status_code=400,
+                detail="校外人员注册时必须填写手机号"
+            )
+
+        username = register_data.phone.strip()
+        identity_no = None
+        phone = register_data.phone.strip()
+
+    # 3. 基本空值校验
+    if not username:
+        raise HTTPException(status_code=400, detail="注册账号不能为空")
+
+    if not register_data.name or not register_data.name.strip():
+        raise HTTPException(status_code=400, detail="姓名不能为空")
+
+    if not register_data.password or len(register_data.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度不能少于6位")
+
+    # 4. 检查 username 是否重复
+    exists_username = db.query(User).filter(User.username == username).first()
+    if exists_username:
+        raise HTTPException(status_code=400, detail="该账号已经注册")
+
+    # 5. 检查学号/工号是否重复
+    if identity_no:
+        exists_identity = db.query(User).filter(User.identity_no == identity_no).first()
+        if exists_identity:
+            raise HTTPException(status_code=400, detail="该学号/工号已经注册")
+
+    # 6. 检查手机号是否重复
+    if phone:
+        exists_phone = db.query(User).filter(User.phone == phone).first()
+        if exists_phone:
+            raise HTTPException(status_code=400, detail="该手机号已经注册")
+
+    # 7. 检查邮箱是否重复
+    email = register_data.email.strip() if register_data.email else None
+    if email:
+        exists_email = db.query(User).filter(User.email == email).first()
+        if exists_email:
+            raise HTTPException(status_code=400, detail="该邮箱已经注册")
+
+    # 8. 创建用户
+    user = User(
+        username=username,
+        password_hash=get_password_hash(register_data.password),
+        name=register_data.name.strip(),
+        role=Role(role),
+        gender=register_data.gender.strip() if register_data.gender else None,
+        phone=phone,
+        email=email,
+        identity_no=identity_no,
+        college=register_data.college.strip() if register_data.college else None,
+        major=register_data.major.strip() if register_data.major else None,
+        title=register_data.title.strip() if register_data.title else None,
+        company=register_data.company.strip() if register_data.company else None,
+
+        # 如果你想注册后直接能登录，使用 ACTIVE
+        account_status=AccountStatus.ACTIVE
+
+        # 如果你想注册后等待管理员审核，改成：
+        # account_status=AccountStatus.PENDING
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "code": 20000,
+        "message": "注册成功",
+        "data": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role.value,
+            "name": user.name,
+            "phone": user.phone,
+            "identityNo": user.identity_no,
+            "accountStatus": user.account_status.value
+        }
+    }
+
 # 登录路由
 @router.post("/vue-admin-template/user/login", response_model=dict)
 async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
@@ -60,6 +176,11 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="用户名或密码错误"
+            )
+        if hasattr(user, "account_status") and user.account_status.value != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="账号未启用或已被禁用"
             )
 
         # 4. 创建访问令牌 - 使用用户名作为subject

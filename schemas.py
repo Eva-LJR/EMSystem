@@ -87,6 +87,31 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+
+
+class RegisterRequest(BaseModel):
+    role: str = Field(..., description="注册角色：student/teacher/outside")
+    password: str = Field(..., min_length=6, description="密码，至少6位")
+    name: str = Field(..., description="姓名")
+
+    # 学生/教师使用：学号或工号
+    identity_no: Optional[str] = Field(None, description="学号或工号")
+
+    # 校外人员使用：手机号
+    phone: Optional[str] = Field(None, description="手机号")
+
+    email: Optional[str] = None
+    gender: Optional[str] = None
+
+    # 学生/教师字段
+    college: Optional[str] = None
+    major: Optional[str] = None
+    title: Optional[str] = None
+
+    # 校外人员字段
+    company: Optional[str] = None
+
+
 # --- 设备相关 ---
 class DeviceBase(BaseModel):
     device_code: Optional[str] = None
