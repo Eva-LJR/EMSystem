@@ -8,7 +8,7 @@ from routers import client
 
 # 1. 核心：必须先实例化 app 对象！(你之前可能漏掉了这一行)
 app = FastAPI(
-    title="江南大学实验室设备管理系统",
+    title="实验室设备管理系统",
     description="后端 API 接口服务",
     version="1.0.0"
 )
@@ -40,4 +40,4 @@ app.include_router(client.router)
 # 根路由测试
 @app.get("/")
 def read_root():
-    return {"message": "欢迎访问江南大学实验室设备管理系统 API 接口服务！"}
+    return {"message": "欢迎访问实验室设备管理系统 API 接口服务！"}
