@@ -96,6 +96,7 @@ class RegisterRequest(BaseModel):
 
     # 学生/教师使用：学号或工号
     identity_no: Optional[str] = Field(None, description="学号或工号")
+    teacher_identity_no: Optional[str] = Field(None, description="学生注册时填写的指导教师工号")
 
     # 校外人员使用：手机号
     phone: Optional[str] = Field(None, description="手机号")
