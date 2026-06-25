@@ -4,7 +4,7 @@ from typing import Optional
 
 from database import get_db
 from models import User, Role, TeacherStudent
-from schemas import UserUpdate
+from schemas import UserUpdate, TeacherStudentBindRequest
 from routers.auth import get_current_user
 
 router = APIRouter(prefix="/api/users", tags=["用户管理"])
@@ -254,4 +254,120 @@ def get_my_students(
     return {
         "code": 20000,
         "data": data
+    }
+
+@router.post("/my-students")
+def bind_my_student(
+    payload: TeacherStudentBindRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    教师手动绑定指导学生。
+    payload.student_no 可以是学生学号，也可以是 username。
+    """
+    if current_user.role != Role.TEACHER:
+        raise HTTPException(status_code=403, detail="只有教师可以绑定指导学生")
+
+    student_no = payload.student_no.strip()
+
+    if not student_no:
+        raise HTTPException(status_code=400, detail="学生学号不能为空")
+
+    student = db.query(User).filter(
+        User.role == Role.STUDENT,
+        (
+            (User.identity_no == student_no) |
+            (User.username == student_no)
+        )
+    ).first()
+
+    if not student:
+        raise HTTPException(status_code=404, detail="未找到该学生，请检查学号")
+
+    existing = db.query(TeacherStudent).filter(
+        TeacherStudent.student_id == student.id
+    ).first()
+
+    if existing:
+        if existing.teacher_id == current_user.id and existing.status == "active":
+            raise HTTPException(status_code=400, detail="该学生已经是你的指导学生")
+
+        if existing.teacher_id != current_user.id and existing.status == "active":
+            raise HTTPException(status_code=400, detail="该学生已经绑定其他指导教师")
+
+        # 如果之前解绑过，则重新绑定到当前教师
+        existing.teacher_id = current_user.id
+        existing.status = "active"
+    else:
+        relation = TeacherStudent(
+            teacher_id=current_user.id,
+            student_id=student.id,
+            status="active"
+        )
+        db.add(relation)
+
+    db.commit()
+
+    return {
+        "code": 20000,
+        "message": "指导学生绑定成功",
+        "data": {
+            "id": student.id,
+            "studentId": student.identity_no or student.username,
+            "username": student.username,
+            "name": student.name,
+            "gender": student.gender,
+            "major": student.major,
+            "college": student.college,
+            "phone": student.phone,
+            "email": student.email,
+            "teacherName": current_user.name,
+            "accountStatus": student.account_status.value if student.account_status else None,
+            "createdAt": student.created_at
+        }
+    }
+
+@router.delete("/my-students/{student_no}")
+def unbind_my_student(
+    student_no: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    教师手动解绑指导学生。
+    student_no 可以是学生学号，也可以是 username。
+    """
+    if current_user.role != Role.TEACHER:
+        raise HTTPException(status_code=403, detail="只有教师可以解绑指导学生")
+
+    student_no = student_no.strip()
+
+    student = db.query(User).filter(
+        User.role == Role.STUDENT,
+        (
+            (User.identity_no == student_no) |
+            (User.username == student_no)
+        )
+    ).first()
+
+    if not student:
+        raise HTTPException(status_code=404, detail="未找到该学生")
+
+    relation = db.query(TeacherStudent).filter(
+        TeacherStudent.teacher_id == current_user.id,
+        TeacherStudent.student_id == student.id,
+        TeacherStudent.status == "active"
+    ).first()
+
+    if not relation:
+        raise HTTPException(status_code=404, detail="未找到该指导关系")
+
+    relation.status = "inactive"
+
+    db.commit()
+
+    return {
+        "code": 20000,
+        "message": "指导学生解绑成功"
     }

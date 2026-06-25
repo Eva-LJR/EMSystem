@@ -66,6 +66,9 @@ class UserUpdate(BaseModel):
     # 校外人员字段
     company: Optional[str] = None
 
+class TeacherStudentBindRequest(BaseModel):
+    student_no: str = Field(..., description="学生学号或用户名")
+
 class UserInDB(UserBase):
     id: int
     avatar: Optional[str] = None
