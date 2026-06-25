@@ -151,6 +151,9 @@ def apply_device_payload(db_device: Device, payload):
 @router.get("/")
 def read_devices(
     status: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -160,11 +163,32 @@ def read_devices(
         parsed_status = parse_device_status(status)
         query = query.filter(Device.status == parsed_status)
 
-    devices = query.order_by(Device.id.asc()).all()
+    if keyword:
+        query = query.filter(
+            (Device.name.contains(keyword)) |
+            (Device.model.contains(keyword)) |
+            (Device.device_code.contains(keyword)) |
+            (Device.manufacturer.contains(keyword))
+        )
+
+    total = query.count()
+
+    devices = (
+        query
+        .order_by(Device.id.asc())
+        .offset((page - 1) * pageSize)
+        .limit(pageSize)
+        .all()
+    )
 
     return {
         "code": 20000,
-        "data": [device_to_frontend(d) for d in devices]
+        "data": {
+            "items": [device_to_frontend(d) for d in devices],
+            "total": total,
+            "page": page,
+            "pageSize": pageSize
+        }
     }
 
 

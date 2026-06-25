@@ -206,6 +206,8 @@ def booking_can_operate_for_teacher(booking: Booking, current_user: User):
 def client_devices(
     keyword: Optional[str] = Query(None),
     status: Optional[DeviceStatus] = Query(None),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -224,11 +226,24 @@ def client_devices(
             (Device.manufacturer.contains(keyword))
         )
 
-    devices = query.order_by(Device.id.asc()).all()
+    total = query.count()
+
+    devices = (
+        query
+        .order_by(Device.id.asc())
+        .offset((page - 1) * pageSize)
+        .limit(pageSize)
+        .all()
+    )
 
     return {
         "code": 20000,
-        "data": [device_to_frontend(d) for d in devices]
+        "data": {
+            "items": [device_to_frontend(d) for d in devices],
+            "total": total,
+            "page": page,
+            "pageSize": pageSize
+        }
     }
 
 
