@@ -5,7 +5,7 @@ from jose import JWTError, jwt
 import traceback
 
 from database import get_db
-from models import User, Role, AccountStatus
+from models import User, Role, AccountStatus, TeacherStudent
 from schemas import Token, UserInDB, LoginRequest, RegisterRequest
 from utils import create_access_token, verify_password, get_password_hash, SECRET_KEY, ALGORITHM
 
