@@ -59,19 +59,39 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
         )
 
     # 2. 根据角色确定 username
+    teacher = None
+
     if role in ["student", "teacher"]:
-        if not register_data.identity_no:
-            raise HTTPException(
-                status_code=400,
-                detail="学生或教师注册时必须填写学号/工号"
-            )
+        if not register_data.identity_no or not register_data.identity_no.strip():
+            if role == "student":
+                raise HTTPException(status_code=400, detail="学生注册时必须填写学号")
+            else:
+                raise HTTPException(status_code=400, detail="教师注册时必须填写工号")
 
         username = register_data.identity_no.strip()
         identity_no = register_data.identity_no.strip()
-        phone = register_data.phone.strip() if register_data.phone else None
+        phone = register_data.phone.strip() if register_data.phone and register_data.phone.strip() else None
+
+        # 学生注册时可以填写指导教师工号，填写后自动绑定
+        if role == "student":
+            if not register_data.teacher_identity_no or not register_data.teacher_identity_no.strip():
+                raise HTTPException(status_code=400, detail="学生注册时必须填写指导教师工号")
+
+            teacher_no = register_data.teacher_identity_no.strip()
+
+            teacher = db.query(User).filter(
+                User.role == Role.TEACHER,
+                (
+                        (User.identity_no == teacher_no) |
+                        (User.username == teacher_no)
+                )
+            ).first()
+
+            if not teacher:
+                raise HTTPException(status_code=400, detail="指导教师工号不存在，请检查后重新填写")
 
     else:
-        if not register_data.phone:
+        if not register_data.phone or not register_data.phone.strip():
             raise HTTPException(
                 status_code=400,
                 detail="校外人员注册时必须填写手机号"
@@ -138,6 +158,17 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
     )
 
     db.add(user)
+    db.flush()
+
+    # 学生注册时自动建立师生关系
+    if role == "student" and teacher:
+        relation = TeacherStudent(
+            teacher_id=teacher.id,
+            student_id=user.id,
+            status="active"
+        )
+        db.add(relation)
+
     db.commit()
     db.refresh(user)
 
@@ -151,6 +182,7 @@ async def register(register_data: RegisterRequest, db: Session = Depends(get_db)
             "name": user.name,
             "phone": user.phone,
             "identityNo": user.identity_no,
+            "teacherName": teacher.name if teacher else None,
             "accountStatus": user.account_status.value
         }
     }
