@@ -28,6 +28,7 @@ def booking_status_label(status):
         BookingStatus.PENDING_ADMIN: "待管理员初审",
         BookingStatus.PENDING_LEADER: "待负责人审批",
         BookingStatus.PENDING_PAYMENT: "待财务缴费",
+        BookingStatus.PAYMENT_SUBMITTED: "待管理员确认缴费",
         BookingStatus.APPROVED: "已通过",
         BookingStatus.REJECTED: "已驳回",
         BookingStatus.CANCELLED: "已撤销",
@@ -98,6 +99,7 @@ def parse_status(value: Optional[str]):
         "pending_admin": BookingStatus.PENDING_ADMIN,
         "pending_leader": BookingStatus.PENDING_LEADER,
         "pending_payment": BookingStatus.PENDING_PAYMENT,
+        "payment_submitted": BookingStatus.PAYMENT_SUBMITTED,
         "approved": BookingStatus.APPROVED,
         "rejected": BookingStatus.REJECTED,
         "cancelled": BookingStatus.CANCELLED,
@@ -107,6 +109,7 @@ def parse_status(value: Optional[str]):
         "待管理员初审": BookingStatus.PENDING_ADMIN,
         "待负责人审批": BookingStatus.PENDING_LEADER,
         "待财务缴费": BookingStatus.PENDING_PAYMENT,
+        "待管理员确认缴费": BookingStatus.PAYMENT_SUBMITTED,
         "已通过": BookingStatus.APPROVED,
         "负责人已通过": BookingStatus.APPROVED,
         "已驳回": BookingStatus.REJECTED,
@@ -117,6 +120,7 @@ def parse_status(value: Optional[str]):
         "PENDING_ADMIN": BookingStatus.PENDING_ADMIN,
         "PENDING_LEADER": BookingStatus.PENDING_LEADER,
         "PENDING_PAYMENT": BookingStatus.PENDING_PAYMENT,
+        "PAYMENT_SUBMITTED": BookingStatus.PAYMENT_SUBMITTED,
         "APPROVED": BookingStatus.APPROVED,
         "REJECTED": BookingStatus.REJECTED,
         "CANCELLED": BookingStatus.CANCELLED,
@@ -416,8 +420,11 @@ def finance_callback(
     if not booking:
         raise HTTPException(status_code=404, detail="预约单未找到")
 
-    if booking.status != BookingStatus.PENDING_PAYMENT:
-        raise HTTPException(status_code=400, detail="单据状态异常，无法完成缴费确认")
+    if booking.status != BookingStatus.PAYMENT_SUBMITTED:
+        raise HTTPException(
+            status_code=400,
+            detail="校外人员尚未完成缴费提交，不能确认缴费"
+        )
 
     old_status = booking.status.value
 
@@ -433,7 +440,7 @@ def finance_callback(
             payer_id=booking.applicant_id,
             payment_no=generate_payment_no(),
             amount=Decimal(str(booking.total_fee or 0)),
-            payment_method="offline",
+            payment_method="online_mock",
             payment_status=PaymentStatus.PAID,
             paid_at=datetime.utcnow(),
         )
