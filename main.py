@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import auth, devices, approvals, users, stats
 from init_db import init_db
 from routers import client
+from routers import stats
 
 
 # 1. 核心：必须先实例化 app 对象！(你之前可能漏掉了这一行)
