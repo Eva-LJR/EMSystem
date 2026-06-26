@@ -9,6 +9,8 @@ from database import get_db
 from models import (
     User,
     Role,
+    Device,
+    DeviceStatus,
     Booking,
     BookingStatus,
     ApprovalStep,
@@ -135,6 +137,16 @@ def parse_status(value: Optional[str]):
 
 def generate_payment_no():
     return "PAY" + datetime.now().strftime("%Y%m%d%H%M%S") + uuid.uuid4().hex[:6].upper()
+
+def device_status_label(status):
+    mapping = {
+        DeviceStatus.IDLE: "可预约",
+        DeviceStatus.USING: "使用中",
+        DeviceStatus.MAINTENANCE: "检修中",
+        DeviceStatus.SCRAPPED: "已报废",
+        DeviceStatus.DISABLED: "已停用",
+    }
+    return mapping.get(status, status.value if status else "未知")
 
 
 def add_approval_record(
@@ -464,4 +476,108 @@ def finance_callback(
         "code": 20000,
         "message": "缴费确认成功，预约已通过",
         "data": booking_to_frontend(booking)
+    }
+
+@router.get("/{booking_id}/availability")
+def check_booking_availability(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    设备管理员查看某个预约单对应设备在申请时段内是否可用。
+    判断逻辑：
+    1. 设备本身不能是检修、停用、报废。
+    2. 同一设备在该时间段不能存在其他未结束、未撤销、未驳回的预约。
+    """
+    if current_user.role != Role.ADMIN:
+        raise HTTPException(status_code=403, detail="只有设备管理员可以查看设备时段可用性")
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="预约单不存在")
+
+    device = db.query(Device).filter(Device.id == booking.device_id).first()
+
+    if not device:
+        raise HTTPException(status_code=404, detail="预约关联设备不存在")
+
+    # 设备基础状态检查
+    device_unavailable_status = [
+        DeviceStatus.MAINTENANCE,
+        DeviceStatus.DISABLED,
+        DeviceStatus.SCRAPPED
+    ]
+
+    device_status_ok = device.status not in device_unavailable_status
+
+    # 检查同一设备在申请时段内是否有其他未结束预约冲突
+    active_statuses = [
+        BookingStatus.PENDING_TEACHER,
+        BookingStatus.PENDING_ADMIN,
+        BookingStatus.PENDING_LEADER,
+        BookingStatus.PENDING_PAYMENT,
+        BookingStatus.PAYMENT_SUBMITTED,
+        BookingStatus.APPROVED,
+    ]
+
+    conflict_bookings = db.query(Booking).filter(
+        Booking.id != booking.id,
+        Booking.device_id == booking.device_id,
+        Booking.status.in_(active_statuses),
+        Booking.current_step != ApprovalStep.END,
+        Booking.start_time < booking.end_time,
+        Booking.end_time > booking.start_time
+    ).order_by(Booking.start_time.asc()).all()
+
+    conflict_list = []
+
+    for item in conflict_bookings:
+        applicant = item.applicant
+
+        conflict_list.append({
+            "id": item.id,
+            "bookingNo": item.booking_no,
+            "applicantName": applicant.name if applicant else None,
+            "applicantRole": applicant.role.value if applicant and applicant.role else None,
+            "startTime": item.start_time,
+            "endTime": item.end_time,
+            "status": booking_status_label(item.status),
+            "statusCode": item.status.value if item.status else None
+        })
+
+    is_available = device_status_ok and len(conflict_list) == 0
+
+    if not device_status_ok:
+        message = f"设备当前状态为【{device_status_label(device.status)}】，不可预约"
+    elif conflict_list:
+        message = "该设备在申请时段内已有其他预约，占用冲突"
+    else:
+        message = "该设备在申请时段内可用"
+
+    return {
+        "code": 20000,
+        "data": {
+            "available": is_available,
+            "message": message,
+            "device": {
+                "id": device.id,
+                "deviceCode": device.device_code,
+                "name": device.name,
+                "model": device.model,
+                "status": device_status_label(device.status),
+                "statusCode": device.status.value if device.status else None,
+                "location": device.location
+            },
+            "booking": {
+                "id": booking.id,
+                "bookingNo": booking.booking_no,
+                "startTime": booking.start_time,
+                "endTime": booking.end_time,
+                "status": booking_status_label(booking.status),
+                "statusCode": booking.status.value if booking.status else None
+            },
+            "conflicts": conflict_list
+        }
     }
