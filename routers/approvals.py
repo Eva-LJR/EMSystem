@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 from decimal import Decimal
+from sqlalchemy import func, or_
 
 from database import get_db
 from models import (
@@ -253,6 +254,17 @@ def get_approvals(
     role: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     current_step: Optional[str] = Query(None),
+
+    # 新增：是否包含历史处理记录
+    include_history: bool = Query(False),
+
+    # 新增：只保留最近几个月，默认 3 个月
+    recent_months: int = Query(3, ge=1, le=12),
+
+    # 新增：分页参数。不传 page/pageSize 时兼容旧前端，仍返回数组
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -271,10 +283,26 @@ def get_approvals(
     if status_enum:
         query = query.filter(Booking.status == status_enum)
 
-    if step_enum:
-        query = query.filter(Booking.current_step == step_enum)
+    # 近三个月记录过滤
+    if include_history:
+        start_date = datetime.utcnow() - timedelta(days=recent_months * 30)
+        query = query.filter(Booking.created_at >= start_date)
 
-    # 实验室负责人默认只看负责人审批环节、待缴费或已完成的校外相关单也可通过参数查看
+    # 当前审批环节过滤
+    if step_enum:
+        if include_history:
+            # 当前待处理记录 + 已处理完成记录都保留
+            query = query.filter(
+                or_(
+                    Booking.current_step == step_enum,
+                    Booking.current_step == ApprovalStep.END
+                )
+            )
+        else:
+            # 旧逻辑：只看当前环节
+            query = query.filter(Booking.current_step == step_enum)
+
+    # 实验室负责人默认只看负责人审批环节、财务环节、已结束环节
     if current_user.role == Role.LAB_LEADER and not current_step:
         query = query.filter(
             Booking.current_step.in_([
@@ -284,11 +312,33 @@ def get_approvals(
             ])
         )
 
-    bookings = query.order_by(Booking.created_at.desc()).all()
+    query = query.order_by(Booking.created_at.desc())
+
+    # 不传分页参数时，兼容旧前端
+    if page is None or pageSize is None:
+        bookings = query.all()
+        return {
+            "code": 20000,
+            "data": [booking_to_frontend(b) for b in bookings]
+        }
+
+    total = query.count()
+
+    bookings = (
+        query
+        .offset((page - 1) * pageSize)
+        .limit(pageSize)
+        .all()
+    )
 
     return {
         "code": 20000,
-        "data": [booking_to_frontend(b) for b in bookings]
+        "data": {
+            "items": [booking_to_frontend(b) for b in bookings],
+            "total": total,
+            "page": page,
+            "pageSize": pageSize
+        }
     }
 
 
