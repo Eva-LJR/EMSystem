@@ -182,6 +182,7 @@ def booking_status_label(status):
         BookingStatus.PENDING_ADMIN: "待管理员初审",
         BookingStatus.PENDING_LEADER: "待负责人审批",
         BookingStatus.PENDING_PAYMENT: "待财务缴费",
+        BookingStatus.PAYMENT_SUBMITTED: "待管理员确认缴费",
         BookingStatus.APPROVED: "已通过",
         BookingStatus.REJECTED: "已驳回",
         BookingStatus.CANCELLED: "已撤销",
@@ -329,6 +330,7 @@ def create_my_booking(
             BookingStatus.PENDING_ADMIN,
             BookingStatus.PENDING_LEADER,
             BookingStatus.PENDING_PAYMENT,
+            BookingStatus.PAYMENT_SUBMITTED,
             BookingStatus.APPROVED,
         ]),
         Booking.start_time < db_end_time,
@@ -640,5 +642,57 @@ def reject_student_booking(
     return {
         "code": 20000,
         "message": "已驳回学生预约",
+        "data": booking_to_frontend(db, booking)
+    }
+
+
+# =========================
+# 8. 新增校外人员模拟缴费接口
+# =========================
+
+@router.post("/bookings/{booking_id}/pay")
+def submit_payment(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    check_client_role(current_user)
+
+    if current_user.role != Role.OUTSIDE:
+        raise HTTPException(status_code=403, detail="只有校外人员可以提交缴费")
+
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+
+    if not booking:
+        raise HTTPException(status_code=404, detail="预约不存在")
+
+    if booking.applicant_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只能操作自己的预约")
+
+    if booking.status != BookingStatus.PENDING_PAYMENT:
+        raise HTTPException(status_code=400, detail="当前预约不处于待缴费状态")
+
+    old_status = booking.status.value
+
+    booking.status = BookingStatus.PAYMENT_SUBMITTED
+    booking.current_step = ApprovalStep.FINANCE
+
+    add_approval_record(
+        db=db,
+        booking=booking,
+        approver_id=current_user.id,
+        step=ApprovalStep.FINANCE,
+        action=ApprovalAction.PAYMENT_CONFIRM,
+        before_status=old_status,
+        after_status=booking.status.value,
+        comment="校外人员已完成模拟财务系统缴费，等待设备管理员确认"
+    )
+
+    db.commit()
+    db.refresh(booking)
+
+    return {
+        "code": 20000,
+        "message": "缴费信息已提交，请等待设备管理员确认",
         "data": booking_to_frontend(db, booking)
     }

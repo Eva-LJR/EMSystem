@@ -51,6 +51,10 @@ class BookingStatus(str, enum.Enum):
     PENDING_ADMIN = "pending_admin"
     PENDING_LEADER = "pending_leader"
     PENDING_PAYMENT = "pending_payment"
+
+    # 校外人员已完成模拟财务缴费，等待设备管理员确认
+    PAYMENT_SUBMITTED = "payment_submitted"
+
     APPROVED = "approved"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
